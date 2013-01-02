@@ -1,66 +1,113 @@
 var http = require('http'),
 	fs = require('fs'),
+	__path = require('path'),
 	url = require('url');
 
 //repolling
 setInterval(function(){
 	//command.reload();
-},10000);
+	//if(data.queue.length)
+	console.log(data.scanner.tree.tet);
+	data.queue.forEach(function(ele){
+		console.log(ele);
+	})
+	data.queue = [];
+},500);
 
 var data = {
 	polling: null,
-	save: null,
+	save: {},
 	trees: {},
 	queue: []
 };
 
-var connect = {
-
-}
-
 //TODO ignore changes on off files(client site)
+//TODO iterval saves
 var sys = {
-	loadSave: function(root){
-		fs.exists('/save', function(exists){
+	loadSave: function(){
+		fs.exists(__dirname+'/cssrl.json', function(exists){
 			if(exists)
-				fs.readFile('/save', function (err, data){
+				fs.readFile(__dirname+'/cssrl.json', function(err, file){
 					if(err) throw err;
-					data.save = JSON.parse(data);
+					data.save = JSON.parse(file);
 					data.queue.push({save: data.save});
+					for(var i in data.save){
+						sys.loadLoc(i);
+					}
 				});
-			else
+			else{
+				data.save = {};
 				data.queue.push({save: null});
+			}
 		});
 	},
-	updateSave: function(){	//TODO lookup
-		fs.writeFile(JSON.stringify(data.save), 'path', function (err) {
-			if (err) throw err;
-			//console.log('It\'s saved!');
+	updateSave: function(){
+		fs.writeFile(__dirname+'/cssrl.json', JSON.stringify(data.save), function(err){
+			if(err) throw err;
 		});
 	},
-	loadLoc: function(path){
-		fs.exists(path, function(exists){
-			if(exists)
-				fs.readFile(path, function(path, err, data){
-					if(err) throw err;
-					var oldtree = JSON.parse(data);
-					sys.mapLoc(path, oldtree);
+	loadLoc: function(path, host){
+		//path = __path.resolve(path);
+		fs.stat(path, function(err, stats){
+			if(err){
+				if(err.errno==34)	//no file
+					data.queue.push({localization: null});
+				else
+					throw err;
+			}else{
+				//if(!stats.isDirectory())
+					//path = __path.dirname(path);
+				if(!(path in data.save))
+					data.save[path] = host;
+
+				fs.exists(path+'/.cssrl.json', function(exists){
+					if(exists){
+						fs.readFile(path+'/.cssrl.json', function(err, data){
+							if(err) throw err;
+							sys.mapLoc(path, JSON.parse(data));
+						});
+					}else{
+						sys.mapLoc(path, {});
+					}
 				});
-			else
-				sys.mapLoc(path, {});
+			}
 		});
 	},
-	saveLoc: function(path){	//TODO lookup
-		fs.writeFile(JSON.stringify(data.tree), path, function (err) {
-			if (err) throw err;
-			//console.log('It\'s saved!');
+	saveLoc: function(path){
+		fs.writeFile(path+'/.cssrl.json', JSON.stringify(sys.preString(data.scanner, {})), function(err){
+			if(err) throw err;
 		});
+	},
+	preString: function(obj, base){	//TODO if folder name == watch
+		if('watch' in obj){
+			base.watch = obj.watch;
+			base.tree = {};
+			sys.preString(obj.tree, base.tree);
+		}else{
+			for(var i in obj){
+				if(obj[i].watcher){
+					var bs = base[i] = {};
+					sys.preString(obj[i],bs);
+				}else{
+					base[i] = obj[i];
+				}
+			}
+		}
+
+		return base;
 	},
 	mapLoc: function(path, oldTree){
 		var scan = function(err, files){
+				if(err) throw err;
+
 				this.progress[0]--;
 				var i = files.length;
 				while(i--){
+					if(files[i]=='.cssrl.json'){
+						this.tree[files[i]] = false;
+						continue;
+					}
+
 					this.progress[1]++;
 					fs.stat(this.path+'/'+files[i], stats.bind(this, files[i]));
 				}
@@ -68,30 +115,54 @@ var sys = {
 			},
 			stats = function(name, err, stats){
 				if(stats.isDirectory()){
+					var prev,scanner;
+					if(name in this.prev)
+						prev = this.prev[name].tree;
+					else
+						prev = {};
+
+					scanner = new scaner(this.path+'/'+name, this.end, ((!(name in this.prev) || this.prev[name].watch)? true : false), prev, {}, this.progress);
+					scanner.watcher = fs.watch(scanner.path, watch.bind(scanner));
+					this.tree[name] = scanner;
+
 					this.progress[0]++;
-					this.tree[name] = {tree: {}, watcher: null};
-					sys.mapLoc(new scaner(this.path+name+'/', this.end, this.prev[name], this.tree[name].tree, this.progress));
+					fs.readdir(scanner.path, scan.bind(scanner));
 				}else{
-					this.tree[name] =(this.prev[name] || !(name in this.prev))? true : false;
+					this.tree[name] =(!(name in this.prev) || this.prev[name])? true : false;
 				}
 				this.progress[1]--;
 				isEnd(this);
 			},
-			watch = function(event, file){
+			watch = function(event, name){
 				if(event=='change'){
-					if(!(this.tree[file] instanceof Object) && this.tree[file]){
-						data.queue.push({'change': this.path+file});
+					if(!(this.tree[name] instanceof Object) && this.tree[name]){
+						data.queue.push({'change': this.path+'/'+name});
 					}
-				}else if(file && !this.isNull){
-					this.tree[file] = true;
-					data.queue.push({'tree_change':{new: this.tree+file}})
+				}else if(name && !this.isNull){	//dir detect
+					fs.stat(this.path+'/'+name, (function(err, stats){
+						if(err)	throw err;
+						if(stats.isDirectory()){
+							var __tree = this.tree;
+							var scanner = new scaner(this.path+'/'+name, function(){
+								__tree[name] = this;
+
+								data.queue.push({'tree_change':{new: this.path, folder: sys.preString(__tree[name] ,{})}});
+							});
+							scanner.watcher = fs.watch(scanner.path, watch.bind(scanner));
+
+							fs.readdir(scanner.path, scan.bind(scanner));
+						}else{
+							this.tree[name] = true;
+							data.queue.push({'tree_change':{new: this.path+'/'+name, folder: null}})
+						}
+					}).bind(this));
 				}else if(this.isNull){
 					clearTimeout(this.interval);
 					this.isNull = false;
 
 					//rename
-					fs.readdir(this.path, watchScan.bind(this,file));
-				}else if(!file){
+					fs.readdir(this.path, watchScan.bind(this,name));
+				}else if(!name){
 					this.isNull = true;
 					this.interval = setTimeout((function(){
 						this.isNull = false;
@@ -101,7 +172,9 @@ var sys = {
 					}).bind(this),100);
 				}
 			},
-			watchScan = function(prevFile, err, files){
+			watchScan = function(nowFile, err, files){
+				if(err) throw err;
+
 				var list = Object.keys(this.tree),
 					index,ele;
 
@@ -118,12 +191,13 @@ var sys = {
 				if(list.length>1)//TODO if more changes over watchScan process, there mybe problems
 					console.log('ehh, error');
 
-				if(!prevFile){
+				if(!nowFile){
 					delete this.tree[list[0]];
-					data.queue.push({'tree_change': {delete: this.path+list[0]}});
+					data.queue.push({'tree_change': {delete: this.path+'/'+list[0]}});
 				}else{
-					this.tree[prevFile] = this.tree[list[0]];
-					data.queue.push({'tree_change': {rename: {from: this.path+list[0], to:this.path+prevFile}}});
+					this.tree[nowFile] = this.tree[list[0]];
+					this.tree[nowFile].path = this.path+'/'+nowFile;
+					data.queue.push({'tree_change': {rename: {from: this.path+'/'+list[0], to:this.path+'/'+nowFile}}});
 					delete this.tree[list[0]];
 				}
 			},
@@ -132,25 +206,22 @@ var sys = {
 					self.end();
 				}
 			},
-			scaner = function(path, fuu, prev, tree, progress){
+			scaner = function(path, fuu, watch, prev, tree, progress){
 				this.path = path;
 				this.tree = tree || {};
 				this.end = fuu.bind(this);
 				this.progress = progress || [1,0];
 				this.prev = prev || {};
+				this.watch = watch;
 				this.isNull = false;
 				this.interval = null;
 				this.watcher = null;
 			}
 
-		var scanner;
-		if(path instanceof scaner)
-			scanner = path;
-		else
-			scanner = new scaner(path, function(){
-				data.trees[path] = this;
-				data.queue.push({localization: {tree: this.tree, path: this.path}});
-			}, oldTree);
+		var scanner = new scaner(path, function(){
+			data.scanner = this;
+			data.queue.push({localization: {tree: sys.preString(this.tree, {}), path: this.path}});
+		}, true, oldTree || {});
 
 		scanner.watcher = fs.watch(scanner.path, watch.bind(scanner));
 		fs.readdir(scanner.path, scan.bind(scanner));
@@ -165,10 +236,28 @@ var sys = {
 			}
 		}
 
-		if(path in data.trees){
-			data.trees[path].watcher.close();
-			loop(data.trees[path].tree);
-			delete data.trees[path];
+		loop(data.scanner.tree[path]);
+		delete  data.scanner.tree[path];
+	},
+	unmapPath: function(path, sub){
+		function loop(base, path){
+			var next = path.shift();
+			if(next in base){
+				if(path.length)
+					loop(base[next], path);
+				else{
+					return [base, next];
+				}
+				//TODO brak sciezki
+			}
+		}
+		if(path in data.scanner.tree){
+			path = path.split(__path.sep);
+			var ret = loop(data.scanner.tree[path], sub);
+			if(typeof ret[0][ret[1]] == 'boolean')
+				ret[0][ret[1]] = !ret[0][ret[1]];
+			else
+				ret[0][ret[1]].watch = !(ret[0][ret[1]].watch);
 		}
 	}
 }
@@ -208,107 +297,14 @@ var command = {
 		//dodajemy zwiazek do listy node.js
 		//jezeli jest to pobieramy save i sprawdzamy za zmianami w katalogu
 		//szukamy w podanych lokalizacjach i zracamy jezeli brak
-		var uriList = [],
-			uriBase,
-			pathname;
 
-		urlList.forEach(function(ele){
-			pathname = url.parse(ele).pathname;
-
-		});
 	}
 }
 
-function scaner(path, fuu, prev,  tree, progress){
-	this.path = path;
-	this.tree = tree || {};
-	this.end = fuu.bind(this);
-	this.progress = progress || [1,0];
-	this.prev = prev || {};
-	this.inNull = false;
-	this.interval = null;
-}
+sys.loadLoc('c://test');
 
-var scanDIR =  function(scanner){
-	var scan = function(err, files){
-			this.progress[0]--;
-			var i = files.length;
-			while(i--){
-				this.progress[1]++;
-				fs.stat(this.path+'/'+files[i], stats.bind(this, files[i]));
-			}
-			isEnd(this);
-		},
-		stats = function(name, err, stats){
-			if(stats.isDirectory()){
-				this.progress[0]++;
-				this.tree[name] = {};
-				scanDIR(new scaner(this.path+name+'/', this.end, this.prev[name], this.tree[name], this.progress));
-			}else{
-				this.tree[name] =(this.prev[name] || !(name in this.prev))? true : false;
-			}
-			this.progress[1]--;
-			isEnd(this);
-		},
-		watch = function(event, file){
-			if(event=='change'){
-				if(!(this.tree[file] instanceof Object) && this.tree[file]){
-					console.log('reload: '+this.path+file);
-					//filechange, send reload this.path+'/'+file
-				}
-			}else if(file && !this.isNull){
-				this.tree[file] = true;
+//console.log(__path.resolve('c://test'));
 
-				//send, new
-				console.log('new: '+file);
-			}else if(this.isNull){
-				clearTimeout(this.interval);
-				this.isNull = false;
-
-				//send reload, rename
-				fs.readdir(this.path, watchScan.bind(this));
-			}else if(!file){
-				this.isNull = true;
-				this.interval = setTimeout((function(){
-					this.isNull = false;
-
-					//send reload, delete
-					fs.readdir(this.path, watchScan.bind(this));
-				}).bind(this),100);
-			}
-		},
-		watchScan = function(err, files){
-			var list = Object.keys(this.tree),
-				newList = [],
-				index,ele,i;
-
-			while(true){
-				ele = files.shift();
-				if(ele==undefined)
-					break;
-
-				index = list.indexOf(ele);
-				if(index==-1){
-					newList.push(ele);
-					this.tree[ele] = true;
-				}else
-					list.splice(index,1);
-			}
-
-			i = list.length;
-			while(i--){
-				delete this.tree[list[i]];
-			}
-		},
-		isEnd = function(self){
-			if(!self.progress[0] && !self.progress[1]){
-				self.end();
-			}
-		}
-
-	fs.watch(scanner.path, watch.bind(scanner));
-	fs.readdir(scanner.path, scan.bind(scanner));
-}
 //scanDIR(new scaner('c://test/', function(){
 	//console.log(this);
 //}));
