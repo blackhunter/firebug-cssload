@@ -7,17 +7,18 @@ var http = require('http'),
 setInterval(function(){
 	//command.reload();
 	//if(data.queue.length)
-	console.log(data.scanner.tree.tet);
-	data.queue.forEach(function(ele){
-		console.log(ele);
-	})
-	data.queue = [];
+	//console.log(data.scanner.tree.tet);
+//	data.queue.forEach(function(ele){
+	//	console.log(ele);
+	//})
+	//data.queue = [];
 },500);
 
 var data = {
 	polling: null,
 	save: {},
 	trees: {},
+	sheets: {},
 	queue: []
 };
 
@@ -260,7 +261,170 @@ var sys = {
 				ret[0][ret[1]].watch = !(ret[0][ret[1]].watch);
 		}
 	}
-}
+	},
+	css = {
+		edit: function(path, styleSheet, now, old){
+			if(old){	//delete or edit
+				var where = styleSheet.map[path],
+					reqExp = new RegExp(old.name+'[^;]+(\n|;)','mi'),
+					string =  styleSheet.data.substring(where.first, where.last);
+
+				string.replace(reqExp, function(match, at1){
+					var ret =now? now.name+': '+now.value+';' : '';
+					if(at1=='\n' && now)
+						ret+='\n'
+					return ret;
+				});
+
+				styleSheet.data.substr(0,where.first) + string + styleSheet.data.substr(where.last);
+			}else{	//new style
+				var where = styleSheet.map[path];
+
+				styleSheet.data = styleSheet.data.substr(0,where.first) +now.name + ': ' + now.value + ';\n' + styleSheet.data.substr(where.first);
+			}
+		},
+		save: function(styleSheet){
+
+			var string = '';
+			for(var i in styles){
+				string += i+' {';
+				string += '}';
+			}
+		},
+		mapStyle: function(data){
+			var i = 0,
+				buffer = '',
+				rules = {},
+				rulesOrder = [],
+				index,level;
+
+			function rule(name, data){
+				var ruler = {
+						name: name,
+						data: data,
+						path: '',
+						prev: null,
+						nested: [],
+						nest: function(){
+							var toNest = rule.apply(null, arguments);
+							toNest.prev = this;
+							if(this.name)
+								this.nested.push(toNest);
+							return toNest;
+						},
+						extend: function(data){
+							if(this.name)
+								this.data += data;
+							else
+								rule(null, data);
+						}
+					},
+					prev = rulesOrder[rulesOrder.length-1];
+
+				if(name){
+					if(ruler.prev)
+						ruler.path += ruler.prev.path;
+					if(name[0]=='&'){
+						ruler.path += name.substr(1);
+					}else{
+						ruler.path += ' '+name;
+					}
+
+					rules[ruler.path] = ruler;
+				}
+
+				if(prev && !prev.name && prev.data=='')
+					rulesOrder.pop();
+				rulesOrder.push(ruler)
+
+				return ruler;
+			}
+
+			level = new rule(null, '');
+
+			for(;i<data.length;i++){
+				switch(data[i]){
+					case '&':
+						buffer += '& '+data[i+1]+' ';
+						i++;
+						break;
+					case ';':
+					case '\n':
+					case '\r':
+						level.extend(buffer);
+						buffer = data[i];
+						break;
+					case '"':
+					case "'":
+						index = data.indexOf(data[i],i+1);
+						if(index==-1){
+							throw new Error('brak klamer');
+						}
+
+						buffer += data.substring(i,index+1);
+						i = index;
+						break;
+					case '/':
+						if(data[i+1]=='*'){
+							index = data.indexOf('*/',i+2);
+							if(index==-1){
+								throw new Error('error: no "*/"');
+							}else{
+								index+=1;
+							}
+						}else if(data[i+1]=='/'){
+							index = data.indexOf('\n',i+2)-1;
+							if(index<0){
+								index = data.length;
+							}
+						}else{
+							buffer += data[i];
+							break;
+						}
+
+						level.extend(data.substring(i,index+1));
+						i = index;
+
+						break;
+					case '{':
+						level = level.nest(buffer.replace(/\s+/g,' ').trim(), '');
+						buffer = '';
+						break;
+					case '}':
+						level.extend(buffer);
+						level = level.prev;
+						buffer = '';
+						break;
+					default:
+						buffer += data[i];
+				}
+			}
+			return [rulesOrder,rules];
+		},
+		loadStyleSheet: function(path){
+			fs.readFile(path, function(err, data){
+				if(err) throw err;
+				data.sheets[path] = css.mapStyle(data);
+				/*
+				fs.writeFile(path, data, function(err){
+					if(err)	throw new err;
+				});*/
+			});
+		},
+		decodeStyleSheet: function(path){
+			var order = data.sheets[path].rulesOrder,
+				length = order.length,
+				file = '',
+				i = 0;
+
+			for(;i<length;i++){
+				order.name
+				file += '{\n';
+				file += order[i].data
+				file += '}\n';
+			}
+		}
+	}
 
 var command = {
 	/*
@@ -301,7 +465,15 @@ var command = {
 	}
 }
 
-sys.loadLoc('c://test');
+fs.open('c://test/testowy.txt','r+', 666, function(err, id){
+	if(err) throw err;
+	fs.write (id, ' \b\r***', 3, 'utf8',  function(err){
+		if(err) throw err;
+		fs.close(id);
+	});
+})
+ //Writes: a (0x61)
+// sys.loadLoc('c://test');
 
 //console.log(__path.resolve('c://test'));
 
