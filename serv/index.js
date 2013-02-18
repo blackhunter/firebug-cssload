@@ -1,6 +1,7 @@
 var http = require('http'),
 	fs = require('fs'),
 	__path = require('path'),
+	less = require('less'),
 	url = require('url');
 
 //repolling
@@ -263,106 +264,120 @@ var sys = {
 	}
 	},
 	css = {
-		edit: function(path, styleSheet, now, old){
+		editProp: function(path, selector, now, old){
 			if(old){	//delete or edit
-				var where = styleSheet.map[path],
-					reqExp = new RegExp(old.name+'[^;]+(\n|;)','mi'),
-					string =  styleSheet.data.substring(where.first, where.last);
+				var where = data.styleSheet[path].rules[selector],
+					reqExp = new RegExp(old.name+'[^;]+(\n|;)','mi');
 
-				string.replace(reqExp, function(match, at1){
+				where.replace(reqExp, function(match, at1){
 					var ret =now? now.name+': '+now.value+';' : '';
 					if(at1=='\n' && now)
 						ret+='\n'
 					return ret;
 				});
-
-				styleSheet.data.substr(0,where.first) + string + styleSheet.data.substr(where.last);
 			}else{	//new style
-				var where = styleSheet.map[path];
-
-				styleSheet.data = styleSheet.data.substr(0,where.first) +now.name + ': ' + now.value + ';\n' + styleSheet.data.substr(where.first);
+				if(selector in data.styleSheet[path].rules)
+					data.styleSheet[path].rules[selector].rules += now.name + ': ' + now.value + ';\n';
+				else{
+					//TODO error
+				}
 			}
 		},
-		save: function(styleSheet){
+		editRule: function(){
 
-			var string = '';
-			for(var i in styles){
-				string += i+' {';
-				string += '}';
+		},
+		mapLess: function(tree){
+			var sheet = {
+				vari:{},
+				selectors:{}
+			};
+
+			var rules = tree.rules,
+				i,rule;
+
+			function loop(base, ele){
+				var selector = base;
+				ele.selectors.forEach(function(prop){
+					selector += prop.combinator.value + prop.value;
+				});
+				//TODO parse selector
+				sheet.selectors[selector] = ele.rules;
+				ele.rules.forEach(function(prop, index){
+					if('selectors' in prop)
+						loop(selector, ele.rules[index]);
+				});
 			}
+
+			for(i in rules){
+				rule = rules[i];
+				if(rule.variable){
+					sheet.vari[rule.name] = rule;
+				}else{
+					loop('', rule);
+				}
+			}
+			console.log(sheet);
 		},
 		mapStyle: function(data){
 			var i = 0,
 				buffer = '',
+				pureBuffer = '',
 				rules = {},
 				rulesOrder = [],
-				index,level;
+				state = false,
+				index,level,common;
 
-			function rule(name, data){
-				var ruler = {
-						name: name,
-						data: data,
-						path: '',
-						prev: null,
-						nested: [],
-						nest: function(){
-							var toNest = rule.apply(null, arguments);
-							toNest.prev = this;
-							if(this.name)
-								this.nested.push(toNest);
-							return toNest;
-						},
-						extend: function(data){
-							if(this.name)
-								this.data += data;
-							else
-								rule(null, data);
-						}
-					},
-					prev = rulesOrder[rulesOrder.length-1];
+			function part(selector, prev){
+				this.prev =!prev? null : prev;
+				this.name = '';
+				this.selector =selector;
+				this.rule = '';
+				this.nested = [];
 
-				if(name){
-					if(ruler.prev)
-						ruler.path += ruler.prev.path;
-					if(name[0]=='&'){
-						ruler.path += name.substr(1);
-					}else{
-						ruler.path += ' '+name;
-					}
-
-					rules[ruler.path] = ruler;
+				this.extend = function(data){
+					this.rule += data;
+				}
+				this.nest = function(buffer, pure){
+					var now = new part(pure.replace(/\s+/g,' ').trim(), this);
+					now.name += buffer;
+					this.nested.push(now);
+					return now;
 				}
 
-				if(prev && !prev.name && prev.data=='')
-					rulesOrder.pop();
-				rulesOrder.push(ruler)
-
-				return ruler;
+				if(!this.prev)
+					rulesOrder.push(this);
+				if(selector)
+					rules[selector] = this;
 			}
 
-			level = new rule(null, '');
+			level = new part(null);
 
 			for(;i<data.length;i++){
+				if(state && /\s/.test(data[i]))
+					continue;
+				else
+					state = false;
+
 				switch(data[i]){
-					case '&':
-						buffer += '& '+data[i+1]+' ';
-						i++;
-						break;
-					case ';':
-					case '\n':
-					case '\r':
-						level.extend(buffer);
-						buffer = data[i];
-						break;
 					case '"':
 					case "'":
 						index = data.indexOf(data[i],i+1);
 						if(index==-1){
-							throw new Error('brak klamer');
+							throw new Error('error: no "*/"');
 						}
 
-						buffer += data.substring(i,index+1);
+						common = data.substring(i,index+1);
+						buffer += common
+						pureBuffer += common;
 						i = index;
+						break;
+					case ';':
+						level.extend(buffer+data[i]);
+						buffer = '';
+						pureBuffer = '';
+
+						if(!level.prev)
+							level = new part(null);
 						break;
 					case '/':
 						if(data[i+1]=='*'){
@@ -378,51 +393,71 @@ var sys = {
 								index = data.length;
 							}
 						}else{
+							pureBuffer += data[i];
 							buffer += data[i];
 							break;
 						}
 
-						level.extend(data.substring(i,index+1));
+						buffer += data.substring(i,index+1);
 						i = index;
 
 						break;
 					case '{':
-						level = level.nest(buffer.replace(/\s+/g,' ').trim(), '');
+						level = level.nest(buffer, pureBuffer);
 						buffer = '';
+						pureBuffer = '';
+
 						break;
 					case '}':
 						level.extend(buffer);
-						level = level.prev;
 						buffer = '';
+						pureBuffer = '';
+
+						state = true;
+						level = level.prev;
 						break;
 					default:
 						buffer += data[i];
+						pureBuffer += data[i];
 				}
 			}
-			return [rulesOrder,rules];
+			return {rulesOrder: rulesOrder, rules: rules};
 		},
-		loadStyleSheet: function(path){
-			fs.readFile(path, function(err, data){
-				if(err) throw err;
-				data.sheets[path] = css.mapStyle(data);
-				/*
-				fs.writeFile(path, data, function(err){
-					if(err)	throw new err;
-				});*/
+		loadStyle: function(path, callback){
+			fs.readFile(path, 'utf-8', function(err, file){
+				if(!err)
+					data.sheets[path] = css.mapStyle(file);
+
+				callback(err, data.sheets[path]);
 			});
 		},
-		decodeStyleSheet: function(path){
-			var order = data.sheets[path].rulesOrder,
-				length = order.length,
-				file = '',
-				i = 0;
+		decodeMap: function(path){
+			function loop(tree){
+				var file = '',
+					i = 0,
+					j = tree.length,
+					empty;
 
-			for(;i<length;i++){
-				order.name
-				file += '{\n';
-				file += order[i].data
-				file += '}\n';
+				for(;i<j;i++){
+					empty = (tree[i].name!='');
+
+					file +=empty? tree[i].name+'{' : '';
+					file += tree[i].rule;
+					if(tree[i].nested){
+						file += loop(tree[i].nested);
+					}
+					file +=empty? '}\n' : '';
+				}
+				return file;
 			}
+
+			return loop(data.sheets[path].rulesOrder);
+		},
+		save: function(path){
+			 fs.writeFile(path, css.decodeMap(path), function (err) {
+			 if (err) throw err;
+			 console.log('It\'s saved!');
+			 });
 		}
 	}
 
@@ -465,13 +500,35 @@ var command = {
 	}
 }
 
+/*
+css.loadStyle('c://test/style.less', function(err){
+	if(err)	throw err;
+	//css.save('c://test/style.less');
+});*/
+
+var parser = new(less.Parser);
+
+parser.parse('@color: red;\n\ndiv//ooot\n{div{color: blue;//mem\n}\nwidth: @color;\n}', function (err, tree) {
+	if (err) { return console.error(err) }
+	var util = require('util');
+
+	console.log(util.inspect(tree.rules, false, null));
+	/*
+	tree.rules.forEach(function(ele){
+		console.log(ele);
+	});*/
+	//console.log(tree);
+});
+
+
+/*
 fs.open('c://test/testowy.txt','r+', 666, function(err, id){
 	if(err) throw err;
 	fs.write (id, ' \b\r***', 3, 'utf8',  function(err){
 		if(err) throw err;
 		fs.close(id);
 	});
-})
+})*/
  //Writes: a (0x61)
 // sys.loadLoc('c://test');
 
@@ -495,7 +552,9 @@ function test(path){
 	});
 }*/
 
-var handle = function(req, res){
+/*
+//addon handler
+http.createServer(function(req, res){
 	var uri = url.parse(req.url, true),
 		path = uri.pathname.substring(1),
 		i;
@@ -504,15 +563,36 @@ var handle = function(req, res){
 		uri.query[i] = decodeURIComponent(uri.query[i]);
 	}
 
-	console.log(path);
-	console.log(uri.query);
-
 	if(path in command)
 		command[path](res, uri.query);
 	else{
 		res.writeHead(200);
 		res.end();
 	}
-}
+}).listen(6776);
 
-//http.createServer( handle ).listen(6776);
+//file handler
+http.createServer(function(req, res){
+	var uri = url.parse(req.url),
+		path = uri.pathname.substring(1),
+		ext = __path.extname(path);
+
+	css.loadStyle(path, function(err){
+		if(err)	throw err;
+
+		res.writeHead(200, {
+			'Content-Length': file.length,
+			'Content-Type': 'text/plain'
+		});
+		res.setHeader('Cache-Control', 'no-cache, no-store');
+
+		var file = css.decodeMap(path);
+		if(ext=='.less'){
+			less.render(file, function (e, file){
+				res.end(file,'utf-8')
+			});
+		}else{
+			res.end(file,'utf-8')
+		}
+	});
+}).listen(6777);*/

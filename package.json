@@ -1,0 +1,18 @@
+{
+	"name": "firebug_cssload",
+	"version": "1.0",
+	"description": "Auto save",
+	"main": "./serv/index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"dependencies": {
+		"less": "1.3.*"
+	},
+	"keywords": [
+		"node.js"
+	],
+	"author": "Wszerad Martynowski",
+	"email": "wszerad91@gmail.com",
+	"license": "BSD"
+}
