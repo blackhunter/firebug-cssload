@@ -1,0 +1,40 @@
+.test(@ama: 4px) {
+	color: red;
+}
+
+.one {
+	@media screen and (device-aspect-ratio: 16/9) screen and (device-aspect-ratio: 16/10) {
+		font-size: 1.2em;
+		@media print and color {
+			color: blue;
+		}
+	}
+}
+
+.child, .sibling {
+	.parent & {
+		color: black;
+	}
+	&+& {
+		color: red;
+	}
+}
+
+@import "lib.less";
+@import "lib";
+@import-once "lib.less";
+@import-once "lib.less";
+/* Hello, I'm a CSS-style comment
+test
+tes
+*/
+.class {
+	//lol
+	color: black;
+	//kek
+}
+
+// Hi, I'm a silent comment, I won't show up in your CSS
+.class {
+	color: white;
+}

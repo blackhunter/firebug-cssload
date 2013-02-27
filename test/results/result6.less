@@ -1,0 +1,15 @@
+@base-url: "http://assets.fnord.com";
+background-image: url("@{base-url}/images/bg.png");
+.class {
+	filter: ~"ms:alwaysHasItsOwnSyntax.For.Stuff()";
+}
+
+@name: blocked;
+.@{name} {
+	color: black;
+}
+
+@var: `"hello".toUpperCase() + '!'`;
+@var: "HELLO!";
+@str: "hello";
+@var: ~`"@{str}".toUpperCase() + '!'`;
