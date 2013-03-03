@@ -73,12 +73,12 @@ FBL.ns(function(){
 		command: function(obj){
 			this.log('command');
 			this.log(obj);
-			return;
 
+			try{
 			var i, src, doc;
 
 			window.TabWatcher.contexts.forEach(function(ele){
-				doc = ele.document;
+				doc = ele.window.document;
 				if(obj.some(function(href){
 					if(href.type=='document'){
 						if(href.reload==doc.location.href)
@@ -102,6 +102,9 @@ FBL.ns(function(){
 					doc.location.reload(true);
 				}
 			});
+			}catch(e){
+				this.log(e);
+			}
 		},
 		mapTab: function(doc){
 			var urls = {
@@ -144,14 +147,14 @@ FBL.ns(function(){
 		onCSSInsertRule: function(sheet, cssText){
 			var url = sheet.href;
 
-			this.send('new', {href: url, css: cssText});
+			//this.send('new', {href: url, css: cssText});
 		},
 
 		onCSSDeleteRule: function(sheet, ruleIndex){
 			var cssText = sheet.cssRules[ruleIndex].selectorText,
 				url = sheet.href;
 
-			this.send('delete', {href: url, css: cssText});
+			//this.send('delete', {href: url, css: cssText});
 		},
 
 		onCSSSetProperty: function(style, propName, propValue, propPriority, prevValue, prevPriority, parent){
@@ -160,12 +163,13 @@ FBL.ns(function(){
 				fullPath = cssText.substr(0, firstBracket),
 				url = parent.parentStyleSheet.href;
 
-			if(propPriority)
-				propValue+=' !important';
-
+			this.log(fullPath);
 			this.send('update', {
-				href: url, selector: fullPath, css: {
-					name: propName, value: propValue
+				href: url, selector: fullPath, nowCss: {
+					name: propName, value: propValue+(propPriority? '!important' : '')
+				},
+				oldCss: {
+					name: propName, value: prevValue+(prevPriority? '!important' : '')
 				}
 			});
 		},
@@ -176,8 +180,10 @@ FBL.ns(function(){
 				fullPath = cssText.substr(0, firstBracket),
 				url = parent.parentStyleSheet.href;
 
-			this.send('update', {
-				href: url, selector: fullPath, css: null
+			this.send('remove', {
+				href: url, selector: fullPath, oldCss: {
+					name: propName, value: prevValue+(prevPriority? '!important' : '')
+				}
 			});
 		},
 		log: function(data){

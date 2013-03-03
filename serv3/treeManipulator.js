@@ -5,8 +5,8 @@ var less = new (require('less').Parser),
 
 module.exports = tree = {
 		editProp: function(tree, selector, now, old){
-			if(selector in tree){
-				var base = tree[selector];
+			if(selector in tree.selectors){
+				var base = tree.selectors[selector];
 				//delete
 				if(old){
 					base.some(function(ele, index){
@@ -34,34 +34,23 @@ module.exports = tree = {
 			function getSelector(ele){
 				return ele.selectors.map(function(selector){
 					return selector.elements.map(function(ele){
-						if(ele.value.name)
-							return vars(ele.value.name, path);
-						else
-							return ele.value;
+						return ele.combinator.value+ele.value;
 					}).join('').trim();
 				}).join(', ');
 			}
 
-
-			function ruleset(self){
-				this.self = self;
-				this.child = function(self){
-					return new ruleset(self);
-				}
-			}
-
-			function loop(rules, path){
+			function loop(rules, lastS){
 				//selectors
 				rules.forEach(function(ele){
 					if('selectors' in ele){
-						var sele = getSelector(ele),
-							now = selectors[sele] = path.child(ele.rules);
-						loop(ele.rules, now);
+						var sele = (lastS+getSelector(ele)).replace(' &',''),
+							now = selectors[sele] = ele.rules;
+						loop(ele.rules, sele+' ');
 					}
 				});
 			}
 
-			loop(tree.rules, new ruleset(tree));
+			loop(tree.rules, '');
 			return selectors;
 		},
 		loadStyle: function(path, cb){

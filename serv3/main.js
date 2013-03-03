@@ -17,11 +17,20 @@ var db = {
 
 var command = {
 	sendReload: function(href){
-		db.pollQueue.push({
-			reload: href,
-			type: db.hrefs[href].type
-		});
-		this.checkPollQueue();
+		var finish = function(){
+			db.pollQueue.push({
+				reload: href,
+				type: db.hrefs[href].type
+			});
+			command.checkPollQueue();
+		};
+
+		if(db.hrefs[href].sheet)	//reload style
+			sys.reloadStyle(href, function(){
+				finish();
+			})
+		else
+			finish();
 	},
 	checkPollQueue: function(){
 		if(db.poll != null && db.pollQueue.length){
@@ -87,24 +96,37 @@ var responses = {
 		command.response(res, 200);
 	},*/
 	new: function(res, query){
-
+		console.log(query);
 	},
 	delete: function(res, query){
-
+		console.log(query);
 	},
 	remove: function(res, query){
-
+		if(query.href in db.hrefs){
+			db.hrefs[query.href].changed = true;
+			manipulator.editProp(db.hrefs[query.href].sheet, query.selector, null, query.oldCss);
+		}
 	},
 	update: function(res, query){
-
+		if(query.href in db.hrefs){
+			db.hrefs[query.href].changed = true;
+			manipulator.editProp(db.hrefs[query.href].sheet, query.selector, query.nowCss, query.oldCss);
+		}
+	},
+	save: function(){
+		var i;
+		for(i in db.hrefs){
+			if(db.hrefs[i].type=='styleSheets' && db.hrefs[i].changed)
+				manipulator.saveStyle(db.hrefs[i].sheet.tree)
+		}
 	}
 }
 
 var sys = {
 	loadStyle: function(res, href){
 		if(href in db.hrefs){
-			var css = db.hrefs[href].tree.toCSS();
-			this.response(res, 200, css);
+			var css = db.hrefs[href].sheet.tree.toCSS();
+			command.response(res, [200, 'text/css'], css);
 		}else
 			this.addHref(res, href, 'styleSheets');
 	},
@@ -140,24 +162,22 @@ var sys = {
 					throw new Error('Nie znaleziono sciezki dla adresu: '+href);
 
 				this.set(path);
-				this.set(fs.watchFile(path, (function(path){
-					command.sendReload(path);
-				}).bind(this, path)));
+				this.set(fs.watchFile(path, command.sendReload.bind(this, href)));
 
-				if(load){
+				if(load)
 					this.cast(manipulator.loadStyle, path);
-				}else
-					this.jump(null);
 			}).then(function(err, data){
 				db.hrefs[href] = {
 					href: href,
 					path: this.get[0],
 					watcher: this.get[1],
 					sheet: data || null,
-					type: type
+					type: type,
+					changed: false
 				};
 
-				command.response(load, [200,'text/css'], data.tree.toCSS());
+				if(load)
+					command.response(load, [200,'text/css'], data.tree.toCSS());
 			}).catch(function(err){
 				console.log(err);
 				if(load)
@@ -165,6 +185,16 @@ var sys = {
 				else
 					console.log(err.message);
 			})
+	},
+	reloadStyle: function(href, cb){
+		manipulator.loadStyle(db.hrefs[href].path, function(err, sheet){
+			if(err)
+				this.addHref(null, href, db.hrefs[href].type);
+			else{
+				db.hrefs[href].sheet = sheet;
+				cb();
+			}
+		})
 	},
 	deleteHref: function(href){
 		db.hrefs[href].watcher.close();
@@ -179,7 +209,8 @@ fs.readFile('config.json', function(err, data){
 		throw new Error(err)
 	}else{
 		db.resolves = JSON.parse(data);
-		db.resolves['127.0.0.1:7000/'] = '';
+		db.resolves['http://127.0.0.1:7000/'] = '';
+		db.resolves['file:///'] = '';
 	}
 })
 
@@ -189,8 +220,6 @@ http.createServer(function(req, res){
 		path = uri.pathname.substring(1),
 		data = '',
 		i;
-
-	console.log('coon');
 
 	if(req.method=="POST"){
 		req.on('data', function(chunk){
@@ -207,11 +236,6 @@ http.createServer(function(req, res){
 			}
 		});
 	}else{
-		for(i in uri.query){
-			uri.query[i] = decodeURIComponent(uri.query[i]);
-		}
-
-		console.log(uri.query[i]);
 		if(path in responses)
 			responses[path](res, uri.query);
 		else{
@@ -223,7 +247,7 @@ http.createServer(function(req, res){
 
 //less loader
 http.createServer(function(req, res){
-	sys.loadStyle(res, '127.0.0.1:7000'+req.url);
+	sys.loadStyle(res, 'http://127.0.0.1:7000'+req.url);
 }).listen(7000);
 
 //master watcher
