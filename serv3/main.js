@@ -2,7 +2,7 @@ var http = require('http'),
 	fs = require('fs'),
 	__path = require('path'),
 	manipulator = require('./treeManipulator.js'),
-	worm = require('earthworm'),
+	worm = require('../../earthworm/lib/main.js'),
 	url = require('url'),
 	util = require('util');
 
@@ -11,58 +11,73 @@ var db = {
 	hrefs: {},
 	poll: null,
 	pollTimeout: null,
-	pollQueue: []
+	pollQueue: [],
+	masterTimeout: null
 }
 
 var command = {
 	sendReload: function(href){
-		var data = JSON.stringify([{reload: href}]);
-		if(db.poll)
-			this.response(true, 200, data);
-		else
-			db.pollQueue.push(data);
+		db.pollQueue.push({
+			reload: href,
+			type: db.hrefs[href].type
+		});
+		this.checkPollQueue();
 	},
 	checkPollQueue: function(){
-		if(db.pollQueue.length){
+		if(db.poll != null && db.pollQueue.length){
 			this.response(true, 200, JSON.stringify(db.pollQueue));
 			db.pollQueue = [];
+			console.log('pong Msg');
 		}
 	},
 	response: function(res, status, data){
+		var type;
+		if(Array.isArray(status)){
+			type = status[1];
+			status = status[0];
+		}
+
 		if(res===true){
 			if(db.pollTimeout)
 				clearTimeout(db.pollTimeout);
 			res = db.poll;
 			db.poll = null;
 		}
-		//TODO if no data
 
-		res.writeHead(status, {
-			'Content-Length': data.length,
-			'Content-Type': 'text/css',
-			'Cache-Control': 'no-cache, no-store'
-		});
+		if(data===undefined && status==200)
+			status =204;
+		else
+			res.setHeader('Content-Length', data.length);
+
+		res.setHeader('Content-Type', (type? type : 'text/plain'));
+		res.setHeader('Cache-Control', 'no-cache, no-store');
+		res.statusCode = status;
 		res.end(data);
 	}
 }
 
 var responses = {
-	polling: function(res){
+	pooling: function(res){
 		db.poll = res;
 		command.checkPollQueue();
 
 		db.pollTimeout = setTimeout(function(){
 			command.response(true, 200);
 			db.pollTimeout = null;
+			console.log('pong ta');
 		},15000);
 	},
 	register: function(res, data){
-		data.forEach(function(ele){
-			if(!(ele in db.hrefs))
-				sys.addHref(ele);
-		});
+		for(var i in data){
+			data[i].forEach(function(ele){
+				if(!(ele in db.hrefs))
+					sys.addHref(null, ele, i);
+			});
+		}
+
 		command.response(res, 200);
 	},
+	/*
 	unregister: function(res, data){
 		data.forEach(function(ele){
 			if(ele in db.hrefs){
@@ -70,7 +85,7 @@ var responses = {
 			}
 		});
 		command.response(res, 200);
-	},
+	},*/
 	new: function(res, query){
 
 	},
@@ -91,20 +106,22 @@ var sys = {
 			var css = db.hrefs[href].tree.toCSS();
 			this.response(res, 200, css);
 		}else
-			this.addHref(res, href);
+			this.addHref(res, href, 'styleSheets');
 	},
-	addHref: function(load, href){
+	addHref: function(load, href, type){
 		var basename = __path.basename(href),
 			paths, i;
 
-		if(!load){
-			for(i in db.resolves){
-				if((new RegExp(i)).test(href)){
-					paths = href.replace(i, db.resolves[i]);
-					break;
-				}
+		//TODO pobieraj najdlusza pasujaca sciezke
+		for(i in db.resolves){
+			if((new RegExp(i)).test(href)){
+				paths = href.replace(i, db.resolves[i]);
+				break;
 			}
 		}
+
+		if(!paths)
+			paths = href;
 
 		if(basename=='')
 			paths = [paths+'index.php', paths+'index.html'];
@@ -112,7 +129,6 @@ var sys = {
 			paths = [paths];
 
 		worm().then(function(){
-			href.forEach((function(){}).bind(this))
 				this.casts(fs.exists, paths, function(exists){
 					if(exists){
 						this.jump();
@@ -120,8 +136,8 @@ var sys = {
 					}
 				})
 			}).then(function(path){
-				if(!path.length)
-					throw new Error(href);
+				if(path==undefined)
+					throw new Error('Nie znaleziono sciezki dla adresu: '+href);
 
 				this.set(path);
 				this.set(fs.watchFile(path, (function(path){
@@ -129,21 +145,25 @@ var sys = {
 				}).bind(this, path)));
 
 				if(load){
-					this.cast(manipulator.loadStyle, [path, 'utf-8']);
+					this.cast(manipulator.loadStyle, path);
 				}else
 					this.jump(null);
 			}).then(function(err, data){
-				db.hrefs.push({
+				db.hrefs[href] = {
 					href: href,
 					path: this.get[0],
 					watcher: this.get[1],
-					tree: data || null
-				});
+					sheet: data || null,
+					type: type
+				};
 
-				command.response(load, 200, data);
+				command.response(load, [200,'text/css'], data.tree.toCSS());
 			}).catch(function(err){
-				var msg = 'Brak arkuszu: '+err.message;
-				command.response(load, 404, msg);
+				console.log(err);
+				if(load)
+					command.response(load, 404, err.message);
+				else
+					console.log(err.message);
 			})
 	},
 	deleteHref: function(href){
@@ -152,6 +172,17 @@ var sys = {
 	}
 }
 
+//loadconfig
+fs.readFile('config.json', function(err, data){
+	if(err){
+		console.log('Problem z wczytaniem pliku konfiguracji!');
+		throw new Error(err)
+	}else{
+		db.resolves = JSON.parse(data);
+		db.resolves['127.0.0.1:7000/'] = '';
+	}
+})
+
 //addon handler
 http.createServer(function(req, res){
 	var uri = url.parse(req.url, true),
@@ -159,14 +190,17 @@ http.createServer(function(req, res){
 		data = '',
 		i;
 
+	console.log('coon');
+
 	if(req.method=="POST"){
 		req.on('data', function(chunk){
 			data += chunk;
 		});
 
 		req.on('end', function(){
-			if(path in command)
-				command[path](res, JSON.parse(data));
+			console.log(data);
+			if(path in responses)
+				responses[path](res, JSON.parse(data));
 			else{
 				res.writeHead(404);
 				res.end();
@@ -177,8 +211,9 @@ http.createServer(function(req, res){
 			uri.query[i] = decodeURIComponent(uri.query[i]);
 		}
 
-		if(path in command)
-			command[path](res, uri.query);
+		console.log(uri.query[i]);
+		if(path in responses)
+			responses[path](res, uri.query);
 		else{
 			res.writeHead(404);
 			res.end();
@@ -186,10 +221,22 @@ http.createServer(function(req, res){
 	}
 }).listen(7001);
 
-//file handler
+//less loader
 http.createServer(function(req, res){
-	var uri = url.parse(req.url),
-		path = uri.pathname.substring(1);
-
-	sys.loadStyle(res, path);
+	sys.loadStyle(res, '127.0.0.1:7000'+req.url);
 }).listen(7000);
+
+//master watcher
+function ticktock(){
+	db.masterTimeout = setTimeout(function(){
+		//wyjscie
+		process.exit();
+	},2000);
+}
+
+process.on('message', function(){
+	clearTimeout(db.masterTimeout);
+	ticktock();
+});
+
+//ticktock();

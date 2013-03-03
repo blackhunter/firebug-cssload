@@ -8,131 +8,112 @@ FBL.ns(function(){
 			Firebug.Module.initialize.apply(this, arguments);
 			Firebug.CSSModule.addListener(this);
 
-			this.con.pool(function(){
-				this.log('Watching start');
-				//locking for changes in tabs
-				this.interval = setInterval((function(){
-					var tabs = window.TabWatcher.contexts,
-						i = tabs.length,
-						hrefs = Object.keys(this.pathes),
-						href, index;
-
-					while(i--){
-						href = tabs[i].window.document.location.href;
-						index = hrefs.indexOf(href);
-
-						if(index!=-1){
-							this.pathes[href] = true;
-							this.mapTab(tabs[i].window.document);
-						}else{
-							hrefs.splice(index,1);
-						}
-					}
-
-					this.con.send('unregister',hrefs);
-				}).bind(this),100);
-			});
+			this.pool();
 		},
 		shutdown: function(){
 			Firebug.Module.shutdown.apply(this, arguments);
 
-			clearInterval(this.interval);
-			this.con.close();
+			this.closePoll();
 		},
-		con: {
-			connect: false,
-			xhr: true,
-			send: function(name, data){
-				var querystring = "http://127.0.0.1:7001/"+name,
-					xhr = new XMLHttpRequest();
-
-				xhr.onreadystatechange = (function(){
-					if(xhr.readyState==4){
-						if(xhr.status != 200){
-							//this.log("CSSave: can't comunicate with server!");
-						}
-					}
-				}).bind(this);
-
-				xhr.open("POST", querystring, true);
-				xhr.send(JSON.stringify(data));
-			},
-			close: function(){
-				this.con.xhr = false;
-			},
-			pool: function(success){
-				if(!this.con.xhr)
-					return;
-
-				var querystring = "http://127.0.0.1:7001/polling",
-					xhr = this.con.xhr = new XMLHttpRequest();
-
-				xhr.onreadystatechange = (function(){
-					if(xhr.readyState==4){
-						if(xhr.status == 200){
-							if(xhr.responseText && xhr.responseText!=''){
-								this.command(JSON.parse(xhr.responseText));
-							}
-
-							if(success)
-								success();
-
-							this.con.polling();
-						}else{
-							setTimeout(this.con.pool,5000);
-						}
-					}
-				}).bind(this);
-
-				xhr.open("GET", querystring, true);
-				xhr.send(null);
-			},
-			queue: null
-		},
-		pathes: {},
-		command: function(obj){
-			var com = Object.keys(obj)[0],
-				data = obj[com];
-
-			if(data in this.pathes){
-				switch(com){
-					case 'reload':
-						window.TabWatcher.contexts.some(function(ele){
-							if(data.href==ele.document.location.href){
-								ele.document.location.reload(true);
-								return true;
-							}
-							return false;
-						});
-						break;
-					case 'reloadImg':
-						window.TabWatcher.contexts.some(function(ele){
-							if(data.href==ele.document.location.href){
-								ele.document.images.some(function(img){
-									if(img.src==data.src){
-										img.src = data.src;
-										return true;
-									}
-									return false;
-								});
-								return true;
-							}
-							return false;
-						});
-						break;
-					case 'register':
-						this.log('No path found for: '+data.href);
-						break;
-				}
+		initContext: function(tab){
+			if(!('window' in tab) || tab.window.location.href==='about:newtab')
+				setTimeout(this.initContext.bind(this, tab), 1000);
+			else{
+				if(tab.window.document.readyState=='complete')
+					this.send('register',this.mapTab(tab.window.document));
+				else
+					tab.window.onload = (function(tab){
+						this.send('register',this.mapTab(tab.window.document));
+					}).bind(this, tab)
 			}
+		},
+		xhr: true,
+		send: function(name, data, success, error){
+			var querystring = "http://127.0.0.1:7001/"+name,
+				xhr = new XMLHttpRequest(),
+				post = true;
+
+			if(data===null || data==='')
+				post = false;
+			else
+				data = JSON.stringify(data);
+
+			xhr.onreadystatechange = (function(){
+				if(xhr.readyState==4){
+					if(xhr.status == 200 || xhr.status == 204){
+						if(success)
+							success.call(this, xhr.responseText);
+					}else{
+						if(error)
+							error.call(this);
+					}
+				}
+			}).bind(this, success, error);
+
+			xhr.open((post? "POST" : "GET"), querystring, true);
+			xhr.send(data);
+		},
+		closePoll: function(){
+			this.xhr = false;
+		},
+		pool: function(){
+			if(!this.xhr)
+				return;
+
+			this.send('pooling', null, function(data){
+				if(data!=''){
+					this.command(JSON.parse(data));
+				}
+				this.pool();
+			},
+			function(){
+				setTimeout(this.pool.bind(this),5000);
+			});
+		},
+		command: function(obj){
+			this.log('command');
+			this.log(obj);
+			return;
+
+			var i, src, doc;
+
+			window.TabWatcher.contexts.forEach(function(ele){
+				doc = ele.document;
+				if(obj.some(function(href){
+					if(href.type=='document'){
+						if(href.reload==doc.location.href)
+							return true;
+					}else{
+						src = (href.type=='styleSheets'? 'href' : 'src');
+						i = doc[href.type].length;
+						//petla po elementach dom danego typu np: styleSheets
+						while(i--){
+							if(doc[href.type].item(i)[src] == href.reload){
+								if(href.type=='images')
+									doc[href.type].item(i)[src] = href.reload;
+								else
+									return true;
+							}
+						}
+						//jezeli nic nie pasuje to return false
+					}
+					return false;
+				})){
+					doc.location.reload(true);
+				}
+			});
 		},
 		mapTab: function(doc){
 			var urls = {
 					scripts: [],
-					styles: [],
-					imgs: []
+					styleSheets: [],
+					images: [],
+					document: []
 				},
 				i,url;
+
+			//doc
+			urls.document.push(doc.location.href)
 
 			//scripts
 			i = doc.scripts.length;
@@ -146,34 +127,31 @@ FBL.ns(function(){
 			while(i--){
 				url = doc.styleSheets.item(i).href;
 				if(url)
-					urls.styles.push(url);
+					urls.styleSheets.push(url);
 			}
 			//images
 			i = doc.images.length;
 			while(i--){
 				url = doc.images.item(i).src;
 				if(url)
-					urls.imgs.push(url);
+					urls.images.push(url);
 			}
 
-			this.con.send('register',urls);
-		},
-		initContext: function(context, state){
-
-		},
+			return urls;
+		},	//TODO iframes
 
 		// CSSModule Listener
 		onCSSInsertRule: function(sheet, cssText){
-			var filePath = sheet.href;
+			var url = sheet.href;
 
-			//this.send('new', cssText, filePath);
+			this.send('new', {href: url, css: cssText});
 		},
 
 		onCSSDeleteRule: function(sheet, ruleIndex){
 			var cssText = sheet.cssRules[ruleIndex].selectorText,
 				url = sheet.href;
 
-			//this.send('delete', cssText, url);
+			this.send('delete', {href: url, css: cssText});
 		},
 
 		onCSSSetProperty: function(style, propName, propValue, propPriority, prevValue, prevPriority, parent){
@@ -185,8 +163,11 @@ FBL.ns(function(){
 			if(propPriority)
 				propValue+=' !important';
 
-			this.log(window);
-			//this.send('update', fullPath, url, propName, propValue);
+			this.send('update', {
+				href: url, selector: fullPath, css: {
+					name: propName, value: propValue
+				}
+			});
 		},
 
 		onCSSRemoveProperty: function(style, propName, prevValue, prevPriority, parent){
@@ -195,25 +176,16 @@ FBL.ns(function(){
 				fullPath = cssText.substr(0, firstBracket),
 				url = parent.parentStyleSheet.href;
 
-			//this.send('remove', fullPath, url, propName, prevValue);
-		},
-
-		send: function(type, path, url, css, value){
-			if(!url)
-				url = window.content.location.pathname;
-
-			var querystring = "http://127.0.0.1:6776/"+type+"?path="+this.encode(path)+"&url="+this.encode(url)+(css? '&css='+css+'&val='+value : ''),
-				xhr = new XMLHttpRequest();
-
-			//xhr.open("GET", querystring, true);
-			//xhr.send(null);
+			this.send('update', {
+				href: url, selector: fullPath, css: null
+			});
 		},
 		log: function(data){
 			Firebug.Console.log(data);
 		}
 	});
 
-	/*
+
 	function HelloWorldPanel() {}
 	HelloWorldPanel.prototype = FBL.extend(Firebug.Panel, {
 		name: "HelloWorld",
@@ -223,7 +195,6 @@ FBL.ns(function(){
 			Firebug.Panel.initialize.apply(this, arguments);
 		}
 	});
-	*/
 	Firebug.registerPanel(HelloWorldPanel);
 
 	Firebug.registerModule(Firebug.MyModule);
