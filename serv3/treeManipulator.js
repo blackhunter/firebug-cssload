@@ -49,22 +49,25 @@ module.exports = tree = {
 					return;
 
 				less.parse(css, function(err, less){
-					less.rules[0].selectors.forEach(function(ele){
-						var startSelector = getSelector({selectors: [ele]});
-						var now = ele,
-							end = [];
+					var startSelector = getSelector(less.rules[0]);
+
+					if(less.rules[0].selectors.length==1){
+						var ele = less.rules[0].selectors[0],
+							startSelector = getSelector({selectors: [ele]}),
+							now = ele,
+							end = [],
+							clone;
 
 						while(true){	//ok
 							if(!now.elements.length){
-								sheet.selectors[startSelector] = {
-									rules: less.rules[0].rules,
-									parent: sheet.tree.rules
-								}
-								sheet.listOut.push(startSelector);
-								sheet.tree.rules.push(less.rules[0]);
 								break;
-
 							}else if((selector = getSelector({selectors: [now]})) in sheet.selectors){
+								if(/[\.\[\:]/.test(end[0].value[0])){
+									clone = Object.create(end[0]);
+									clone.value = '&';
+									end.unshift(clone);
+								}
+
 								ele.elements = end;
 								sheet.selectors[selector].rules.push(less.rules[0]);
 								sheet.listOut.push(startSelector);
@@ -72,12 +75,20 @@ module.exports = tree = {
 									rules: less.rules[0].rules,
 									parent: sheet.selectors[selector]
 								}
-								break;
+								return;
 							}else{
 								end.push(now.elements.pop())
 							}
 						}
-					});
+					}
+
+					//else
+					sheet.selectors[startSelector] = {
+						rules: less.rules[0].rules,
+						parent: sheet.tree.rules
+					}
+					sheet.listOut.push(startSelector);
+					sheet.tree.rules.push(less.rules[0]);
 				});
 			}
 		},
