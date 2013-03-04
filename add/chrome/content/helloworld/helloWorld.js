@@ -145,16 +145,47 @@ FBL.ns(function(){
 
 		// CSSModule Listener
 		onCSSInsertRule: function(sheet, cssText){
-			var url = sheet.href;
+			var sheets = sheet.ownerNode.ownerDocument.styleSheets,
+				i = sheets.length,
+				fromFile = !sheet.href,
+				url;
 
-			//this.send('new', {href: url, css: cssText});
+			while(i--){
+				if(sheet.item(i).title=='def'){
+					url = sheet.item(i).href;
+					break;
+				}else if(sheet.item(i).href.indexOf('http://127.0.0.1:7000')!=-1){
+					url = sheet.item(i).href;
+				}
+			}
+
+			if(url)
+				this.send('new', {href: url, css: cssText, fromFile: fromFile});
+			else{
+				//TODO warm
+			}
 		},
 
 		onCSSDeleteRule: function(sheet, ruleIndex){
-			var cssText = sheet.cssRules[ruleIndex].selectorText,
-				url = sheet.href;
+			var sheets = sheet.ownerNode.ownerDocument.styleSheets,
+				i = sheets.length,
+				fromFile = !sheet.href,
+				url;
 
-			//this.send('delete', {href: url, css: cssText});
+			while(i--){
+				if(sheet.item(i).title=='def'){
+					url = sheet.item(i).href;
+					break;
+				}else if(sheet.item(i).href.indexOf('http://127.0.0.1:7000')!=-1){
+					url = sheet.item(i).href;
+				}
+			}
+
+			if(url)
+				this.send('new', {href: url, index: ruleIndex, fromFile: fromFile});
+			else{
+				//TODO warm
+			}
 		},
 
 		onCSSSetProperty: function(style, propName, propValue, propPriority, prevValue, prevPriority, parent){
@@ -163,7 +194,6 @@ FBL.ns(function(){
 				fullPath = cssText.substr(0, firstBracket),
 				url = parent.parentStyleSheet.href;
 
-			this.log(fullPath);
 			this.send('update', {
 				href: url, selector: fullPath, nowCss: {
 					name: propName, value: propValue+(propPriority? '!important' : '')

@@ -62,7 +62,7 @@ module.exports = tree = {
 			}
 
 			loop(tree.rules, new ruleset(tree));
-			return selectors;
+			//return selectors;
 		},
 		loadStyle: function(path, cb){
 			fs.readFile(path, 'utf-8', function(err, file){
@@ -81,7 +81,7 @@ module.exports = tree = {
 
 						cb(err);
 					});
-				}else
+				}else if(cb)
 					cb(err);
 			});
 		},

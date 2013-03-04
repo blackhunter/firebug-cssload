@@ -479,11 +479,11 @@ var command = {
 		//var path = url.parse(query.url).pathname;
 
 		//this.reload(null);
-		data.polling = res;
+		data.poolling = res;
 		res.writeHead(200);
 	},
 	reload: function(msg){
-		data.polling.end(msg? msg : '');
+		data.poolling.end(msg? msg : '');
 	},
 	test: function(res){
 		this.reload("/leki/html/");

@@ -96,10 +96,16 @@ var responses = {
 		command.response(res, 200);
 	},*/
 	new: function(res, query){
-		console.log(query);
+		if(query.href in db.hrefs){
+			db.hrefs[query.href].changed = true;
+			manipulator.editRule(db.hrefs[query.href].sheet, query.css, query.fromFile);
+		}
 	},
 	delete: function(res, query){
-		console.log(query);
+		if(query.href in db.hrefs){
+			db.hrefs[query.href].changed = true;
+			manipulator.editRule(db.hrefs[query.href].sheet, query.index, query.fromFile);
+		}
 	},
 	remove: function(res, query){
 		if(query.href in db.hrefs){
