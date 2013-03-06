@@ -1,10 +1,9 @@
 var http = require('http'),
 	fs = require('fs'),
 	__path = require('path'),
-	manipulator = require('./treeManipulator.js'),
+	manipulator = require('lessTree'),
 	worm = require('../../earthworm/lib/main.js'),
-	url = require('url'),
-	util = require('util');
+	url = require('url');
 
 var db = {
 	resolves: {},
@@ -14,6 +13,8 @@ var db = {
 	pollQueue: [],
 	masterTimeout: null
 }
+
+//TODO watch reloadfilter
 
 var command = {
 	sendReload: function(href){
@@ -26,7 +27,7 @@ var command = {
 		};
 
 		if(db.hrefs[href].sheet)	//reload style
-			sys.reloadStyle(href, function(){
+			command.reloadStyle(href, function(){
 				finish();
 			})
 		else
@@ -34,34 +35,87 @@ var command = {
 	},
 	checkPollQueue: function(){
 		if(db.poll != null && db.pollQueue.length){
-			this.response(true, 200, JSON.stringify(db.pollQueue));
+			responses.response(true, JSON.stringify(db.pollQueue));
 			db.pollQueue = [];
 			console.log('pong Msg');
 		}
 	},
-	response: function(res, status, data){
-		var type;
-		if(Array.isArray(status)){
-			type = status[1];
-			status = status[0];
+	loadStyle: function(res, href){
+		if(href in db.hrefs){
+			var css = db.hrefs[href].sheet.tree.toCSS();
+			responses.response(res, css, {type: 'text/css'});
+		}else
+			this.addHref(res, href, 'styleSheets');
+	},
+	addHref: function(load, href, type){
+		var basename = __path.basename(href),
+			paths, i;
+
+		//TODO pobieraj najdlusza pasujaca sciezke
+		for(i in db.resolves){
+			if((new RegExp(i)).test(href)){
+				paths = href.replace(i, db.resolves[i]);
+				break;
+			}
 		}
 
-		if(res===true){
-			if(db.pollTimeout)
-				clearTimeout(db.pollTimeout);
-			res = db.poll;
-			db.poll = null;
-		}
+		if(!paths)
+			paths = href;
 
-		if(data===undefined && status==200)
-			status =204;
+		if(basename=='')
+			paths = [paths+'index.php', paths+'index.html'];
 		else
-			res.setHeader('Content-Length', data.length);
+			paths = [paths];
 
-		res.setHeader('Content-Type', (type? type : 'text/plain'));
-		res.setHeader('Cache-Control', 'no-cache, no-store');
-		res.statusCode = status;
-		res.end(data);
+		worm().then(function(){
+			this.casts(fs.exists, paths, function(exists){
+				if(exists){
+					this.jump();
+					return this.params[0];
+				}
+			})
+		}).then(function(path){
+				if(path==undefined)
+					throw new Error('Nie znaleziono sciezki dla adresu: '+href);
+
+				this.set(path);
+				this.set(fs.watchFile(path, command.sendReload.bind(this, href)));
+
+				if(load)
+					this.cast(manipulator.loadStyle, path);
+			}).then(function(err, data){
+				db.hrefs[href] = {
+					href: href,
+					path: this.get[0],
+					watcher: this.get[1],
+					sheet: data || null,
+					type: type,
+					changed: false
+				};
+
+				if(load)
+					responses.response(load, data.tree.toCSS(), {type: 'text/css'});
+			}).catch(function(err){
+				console.log(err);
+				if(load)
+					responses.response(load, err.message, {status: 404});
+				else
+					console.log(err.message);
+			})
+	},
+	reloadStyle: function(href, cb){
+		manipulator.loadStyle(db.hrefs[href].path, function(err, sheet){
+			if(err)
+				this.addHref(null, href, db.hrefs[href].type);
+			else{
+				db.hrefs[href].sheet = sheet;
+				cb();
+			}
+		})
+	},
+	deleteHref: function(href){
+		db.hrefs[href].watcher.close();
+		delete db.hrefs[href];
 	}
 }
 
@@ -71,7 +125,7 @@ var responses = {
 		command.checkPollQueue();
 
 		db.pollTimeout = setTimeout(function(){
-			command.response(true, 200);
+			responses.response(true, 200);
 			db.pollTimeout = null;
 			console.log('pong ta');
 		},15000);
@@ -80,17 +134,17 @@ var responses = {
 		for(var i in data){
 			data[i].forEach(function(ele){
 				if(!(ele in db.hrefs))
-					sys.addHref(null, ele, i);
+					command.addHref(null, ele, i);
 			});
 		}
 
-		command.response(res, 200);
+		responses.response(res);
 	},
 	/*
 	unregister: function(res, data){
 		data.forEach(function(ele){
 			if(ele in db.hrefs){
-				sys.deleteHref(ele);
+	 command.deleteHref(ele);
 			}
 		});
 		command.response(res, 200);
@@ -125,86 +179,38 @@ var responses = {
 			if(db.hrefs[i].type=='styleSheets' && db.hrefs[i].changed)
 				manipulator.saveStyle(db.hrefs[i].sheet.tree)
 		}
-	}
-}
-
-var sys = {
-	loadStyle: function(res, href){
-		if(href in db.hrefs){
-			var css = db.hrefs[href].sheet.tree.toCSS();
-			command.response(res, [200, 'text/css'], css);
-		}else
-			this.addHref(res, href, 'styleSheets');
 	},
-	addHref: function(load, href, type){
-		var basename = __path.basename(href),
-			paths, i;
+	response: function(res, data, setStats){
+		var
+			status,
+			type;
 
-		//TODO pobieraj najdlusza pasujaca sciezke
-		for(i in db.resolves){
-			if((new RegExp(i)).test(href)){
-				paths = href.replace(i, db.resolves[i]);
-				break;
-			}
+		if(setStats){
+			status = setStats.status || 200;
+			type = setStats.type || 'text/plain';
 		}
 
-		if(!paths)
-			paths = href;
+		if(data==null){
+			status = 204;
+			data=null;
+		}else{
+			if(data instanceof Object)
+				data = JSON.stringify(data);
 
-		if(basename=='')
-			paths = [paths+'index.php', paths+'index.html'];
-		else
-			paths = [paths];
+			res.setHeader('Content-Length', data.length);
+		}
 
-		worm().then(function(){
-				this.casts(fs.exists, paths, function(exists){
-					if(exists){
-						this.jump();
-						return this.params[0];
-					}
-				})
-			}).then(function(path){
-				if(path==undefined)
-					throw new Error('Nie znaleziono sciezki dla adresu: '+href);
+		if(res===true){
+			if(db.pollTimeout)
+				clearTimeout(db.pollTimeout);
+			res = db.poll;
+			db.poll = null;
+		}
 
-				this.set(path);
-				this.set(fs.watchFile(path, command.sendReload.bind(this, href)));
-
-				if(load)
-					this.cast(manipulator.loadStyle, path);
-			}).then(function(err, data){
-				db.hrefs[href] = {
-					href: href,
-					path: this.get[0],
-					watcher: this.get[1],
-					sheet: data || null,
-					type: type,
-					changed: false
-				};
-
-				if(load)
-					command.response(load, [200,'text/css'], data.tree.toCSS());
-			}).catch(function(err){
-				console.log(err);
-				if(load)
-					command.response(load, 404, err.message);
-				else
-					console.log(err.message);
-			})
-	},
-	reloadStyle: function(href, cb){
-		manipulator.loadStyle(db.hrefs[href].path, function(err, sheet){
-			if(err)
-				this.addHref(null, href, db.hrefs[href].type);
-			else{
-				db.hrefs[href].sheet = sheet;
-				cb();
-			}
-		})
-	},
-	deleteHref: function(href){
-		db.hrefs[href].watcher.close();
-		delete db.hrefs[href];
+		res.setHeader('Content-Type',type);
+		res.setHeader('Cache-Control', 'no-cache, no-store');
+		res.statusCode = status;
+		res.end(data);
 	}
 }
 
@@ -253,7 +259,7 @@ http.createServer(function(req, res){
 
 //less loader
 http.createServer(function(req, res){
-	sys.loadStyle(res, 'http://127.0.0.1:7000'+req.url);
+	command.loadStyle(res, 'http://127.0.0.1:7000'+req.url);
 }).listen(7000);
 
 //master watcher

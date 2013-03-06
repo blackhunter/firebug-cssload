@@ -1,6 +1,6 @@
 {
 	"name": "firebug_cssload",
-	"version": "1.0",
+	"version": "0.0.1",
 	"description": "Auto save",
 	"main": "./serv/index.js",
 	"scripts": {
@@ -9,8 +9,14 @@
 	"dependencies": {
 		"less": "1.3.*"
 	},
+	"bin": {
+		"fireload": "./bin/start.js"
+	},
 	"keywords": [
-		"node.js"
+		"node.js",
+		"firefox",
+		"css",
+		"less"
 	],
 	"author": "Wszerad Martynowski",
 	"email": "wszerad91@gmail.com",
