@@ -17,6 +17,14 @@ var db = {
 //TODO watch reloadfilter
 
 var command = {
+	sheet: function(href, path, watcher, data, type){
+		this.href = href;
+		this.path =path;
+		this.watcher = watcher;
+		this.sheet =  data || null;
+		this.type = type;
+		this.changed = false;
+	},
 	sendReload: function(href){
 		var finish = function(){
 			db.pollQueue.push({
@@ -29,7 +37,7 @@ var command = {
 		if(db.hrefs[href].sheet)	//reload style
 			command.reloadStyle(href, function(){
 				finish();
-			})
+			});
 		else
 			finish();
 	},
@@ -41,14 +49,14 @@ var command = {
 		}
 	},
 	loadStyle: function(res, href){
-		if(href in db.hrefs){
-			var css = db.hrefs[href].sheet.tree.toCSS();
-			responses.response(res, css, {type: 'text/css'});
-		}else
+		if(href in db.hrefs)
+			responses.response(res, db.hrefs[href].sheet.toCSS(), {type: 'text/css'});
+		else
 			this.addHref(res, href, 'styleSheets');
 	},
 	addHref: function(load, href, type){
 		var basename = __path.basename(href),
+			self = this,
 			paths, i;
 
 		//TODO pobieraj najdlusza pasujaca sciezke
@@ -82,19 +90,12 @@ var command = {
 				this.set(fs.watchFile(path, command.sendReload.bind(this, href)));
 
 				if(load)
-					this.cast(manipulator.loadStyle, path);
+					this.cast(manipulator.load, path);
 			}).then(function(err, data){
-				db.hrefs[href] = {
-					href: href,
-					path: this.get[0],
-					watcher: this.get[1],
-					sheet: data || null,
-					type: type,
-					changed: false
-				};
+				db.hrefs[href] = new self.sheet(href, this.get[0], this.get[1], data, type);
 
 				if(load)
-					responses.response(load, data.tree.toCSS(), {type: 'text/css'});
+					responses.response(load, db.hrefs[href].sheet.toCSS(), {type: 'text/css'});
 			}).catch(function(err){
 				console.log(err);
 				if(load)
@@ -104,7 +105,7 @@ var command = {
 			})
 	},
 	reloadStyle: function(href, cb){
-		manipulator.loadStyle(db.hrefs[href].path, function(err, sheet){
+		manipulator.load(db.hrefs[href].path, function(err, sheet){
 			if(err)
 				this.addHref(null, href, db.hrefs[href].type);
 			else{
@@ -152,32 +153,32 @@ var responses = {
 	new: function(res, query){
 		if(query.href in db.hrefs){
 			db.hrefs[query.href].changed = true;
-			manipulator.editRule(db.hrefs[query.href].sheet, query.css, query.fromFile);
+			db.hrefs[query.href].sheet.editRule(query.css, query.fromFile);
 		}
 	},
 	delete: function(res, query){
 		if(query.href in db.hrefs){
 			db.hrefs[query.href].changed = true;
-			manipulator.editRule(db.hrefs[query.href].sheet, query.index, query.fromFile);
+			db.hrefs[query.href].sheet.editRule(query.index, query.fromFile);
 		}
 	},
 	remove: function(res, query){
 		if(query.href in db.hrefs){
 			db.hrefs[query.href].changed = true;
-			manipulator.editProp(db.hrefs[query.href].sheet, query.selector, null, query.oldCss);
+			db.hrefs[query.href].sheet.editProp(query.selector, null, query.oldCss);
 		}
 	},
 	update: function(res, query){
 		if(query.href in db.hrefs){
 			db.hrefs[query.href].changed = true;
-			manipulator.editProp(db.hrefs[query.href].sheet, query.selector, query.nowCss, query.oldCss);
+			db.hrefs[query.href].sheet.editProp(query.selector, query.nowCss, query.oldCss);
 		}
 	},
 	save: function(){
 		var i;
 		for(i in db.hrefs){
 			if(db.hrefs[i].type=='styleSheets' && db.hrefs[i].changed)
-				manipulator.saveStyle(db.hrefs[i].sheet.tree)
+				db.hrefs[i].sheet.save();
 		}
 	},
 	response: function(res, data, setStats){
@@ -215,7 +216,7 @@ var responses = {
 }
 
 //loadconfig
-fs.readFile('config.json', function(err, data){
+fs.readFile(__dirname+'config.json', function(err, data){
 	if(err){
 		console.log('Problem z wczytaniem pliku konfiguracji!');
 		throw new Error(err)
@@ -275,4 +276,4 @@ process.on('message', function(){
 	ticktock();
 });
 
-//ticktock();
+ticktock();
