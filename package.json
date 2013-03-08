@@ -1,6 +1,6 @@
 {
-	"name": "firebug_cssload",
-	"version": "0.0.1",
+	"name": "fireload",
+	"version": "0.0.2",
 	"description": "Auto save",
 	"main": "./serv/index.js",
 	"scripts": {
