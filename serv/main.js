@@ -2,7 +2,7 @@ var http = require('http'),
 	fs = require('fs'),
 	__path = require('path'),
 	manipulator = require('lessTree'),
-	worm = require('../../earthworm/lib/main.js'),
+	worm = require('earthworm'),
 	url = require('url');
 
 var db = {
