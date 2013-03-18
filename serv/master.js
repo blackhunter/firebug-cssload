@@ -28,6 +28,10 @@ module.exports = function(){
 			case 'restart\n':
 				start();
 				break;
+			case 'save\n':
+				if(currWoreker)
+					currWoreker.send('save');
+				break;
 		}
 	})
 

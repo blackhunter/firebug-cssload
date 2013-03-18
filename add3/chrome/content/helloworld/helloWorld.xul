@@ -1,0 +1,21 @@
+<?xml version="1.0"?> 
+
+<overlay id="MyModule-overlay" xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+    <script src="chrome://helloworld/content/helloWorld.js" type="application/x-javascript"/>
+
+	<commandset id="mainCommandSet">
+		<command id="cmd_syncCommando" oncommand="Firebug.MyModule.onSave();"/>
+	</commandset>
+
+
+	<toolbar id="fbToolbar" align="center">
+		<hbox id="fbToolbarInner" insertbefore="fbDetachButton" flex="1" align="center">
+			<hbox id="cssUpdaterButtons" insertafter="fbNetButtons">
+				<toolbarseparator/>
+				<toolbarbutton label="text" class="toolbar-text-button" tooltiptext="text" command="cmd_syncCommando"/>
+				<toolbarseparator/>
+				<toolbarbutton label="text" class="toolbar-text-button" tooltiptext="text" command="cmd_syncCommando"/>
+			</hbox>
+		</hbox>
+	</toolbar>
+</overlay>
